@@ -9,6 +9,7 @@
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/compass_biped</url>
   <depend package="RobotController"/>
+  <depend package="GA"/>  
 
 </package>
 
