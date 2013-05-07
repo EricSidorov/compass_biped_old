@@ -12,29 +12,31 @@ from math import ceil
 import yaml
 from copy import copy
 from std_srvs.srv import Empty
-import sys
 
-class CB_Controller(object):
-    """CB_Controller"""
+class GCB_Controller(object):
+    """Ghost CB_Controller for the compas biped model that uses 2 overlapping legs"""
     def __init__(self, arg):
-        # super(CB_Controller, self).__init__()
+        super(GCB_Controller, self).__init__()
 
         ##################################################################
         ######################## GAIT PARAMETERS #########################
         ##################################################################
         if len(arg)<12:
-            self.SwingEff0 = 0.46        # Default swing effort
+            self.SwingEff0 = 0.45        # Default swing effort
             self.kAp = 2                 # Aperture feedback gain
-            self.DesAp = 0.4             # Desired aperture
+            self.DesAp = 0.35            # Desired aperture
             self.SupAnkGain_p = 10       # Ankle gain p during support
-            self.SupAnkGain_d = 4        # Ankle gain d during support
-            self.SupAnkSetPoint = -0.02  # Support ankle set point
-            self.ToeOffEff = 4           # Toe-off effort
-            self.ToeOffDur = 0.12        # Toe-off duration
+            self.SupAnkGain_d = 5        # Ankle gain d during support
+            self.SupAnkSetPoint = -0.03  # Support ankle set point
+            self.ToeOffEff0 = 4.0        # Toe-off effort
+            self.ToeOffDur = 0.16        # Toe-off duration
             self.TotSwingDur = 0.85      # Swing duration
-            self.FootExtEff = 0.95       # Foot extension effort (right before touch down)
+            self.FootExtEff = 0.85       # Foot extension effort (right before touch down)
             self.FootExtDur = 0.18       # Foot extension duration
             self.FreeSwingDur = 0.15     # Swing duration
+            
+            self.SwingEff = self.SwingEff0
+            self.ToeOffEff = self.ToeOffEff0
         else:
             self.SwingEff0 = arg[0]      # Default swing effort
             self.kAp = arg[1]            # Aperture feedback gain
@@ -42,12 +44,15 @@ class CB_Controller(object):
             self.SupAnkGain_p = arg[3]   # Ankle gain p during support
             self.SupAnkGain_d = arg[4]   # Ankle gain d during support
             self.SupAnkSetPoint = arg[5] # Support ankle set point
-            self.ToeOffEff = arg[6]      # Toe-off effort
+            self.ToeOffEff0 = arg[6]      # Toe-off effort
             self.ToeOffDur = arg[7]      # Toe-off duration
             self.TotSwingDur = arg[8]    # Swing duration
             self.FootExtEff = arg[9]     # Foot extension effort (right before touch down)
             self.FootExtDur = arg[10]    # Foot extension duration
             self.FreeSwingDur = arg[11]  # Swing duration
+            
+            self.SwingEff = self.SwingEff0
+            self.ToeOffEff = self.ToeOffEff0
         
         self.StepsTaken = 0
         self.ApertureMean = 0
@@ -60,45 +65,45 @@ class CB_Controller(object):
         ###################### RAISE FOOT SEQUENCE #######################
         ##################################################################
 
-        self.pos1=zeros(5)
+        self.pos1=zeros(3)
 
-        # Sequence 1 for raising the inner foot (from home position)
+        # Sequence 1 for raising the left foot (from home position)
         self.seq1_1=copy(self.pos1)
-        self.seq1_1[1] = self.seq1_1[3] = self.seq1_1[0] = 0.2
+        self.seq1_1[0] = self.seq1_1[1] = 0.2
 
         self.seq1_2=copy(self.seq1_1)
-        self.seq1_2[0] = -1.45
-        self.seq1_2[1] = self.seq1_2[3] = 0.16
-        self.seq1_2[2] = self.seq1_2[4] = 0.06
+        self.seq1_2[1] = -1.45
+        self.seq1_2[0] = 0.16
+        self.seq1_2[2] = 0.06
 
         self.seq1_3=copy(self.seq1_2)
-        self.seq1_3[1] = self.seq1_3[3] = 0.1
+        self.seq1_3[0] = -0.1
 
-        # Sequence 2 for raising the outer feet (from home position)
+        # Sequence 2 for raising the right foot (from home position)
         self.seq2_1=copy(self.pos1)
-        self.seq2_1[1] = self.seq2_1[3] = -0.2
-        self.seq2_1[2] = self.seq2_1[4] = 0.2
+        self.seq2_1[0] = -0.2
+        self.seq2_1[2] = 0.2
 
         self.seq2_2=copy(self.seq2_1)
-        self.seq2_2[2] = self.seq2_2[4] = -1.45
-        self.seq2_2[1] = self.seq2_2[3] = -0.16
-        self.seq2_2[0] = 0.06
+        self.seq2_2[2] = -1.45
+        self.seq2_2[0] = -0.16
+        self.seq2_2[1] = 0.06
 
         self.seq2_3=copy(self.seq2_2)
-        self.seq2_3[1] = self.seq2_3[3] = -0.1
+        self.seq2_3[0] = 0.1
 
         ##################################################################
         ########################## INITIALIZE ############################
         ##################################################################
 
         # Initialize joint commands handler
-        self._robot_name = 'compass_biped'
-        self._jnt_names = ['inner_ankle','left_hip','left_ankle','right_hip','right_ankle']
+        self._robot_name = "ghost_compass_biped"
+        self._jnt_names = ["hip","left_ankle","right_ankle"]
         self.JC = JointCommands_msg_handler(self._robot_name,self._jnt_names)
 
         # Initialize robot state listener
         self.RS = robot_state(self._jnt_names)
-        self.MsgSub = rospy.Subscriber('/'+self._robot_name+'/robot_state',RobotState,self.RS_cb)
+        self.MsgSub = rospy.Subscriber('/'+self._robot_name+'ghost_compass_biped/robot_state',RobotState,self.RS_cb)
         self.OdomSub = rospy.Subscriber('/ground_truth_odom',Odometry,self.Odom_cb)
 
 
@@ -107,143 +112,116 @@ class CB_Controller(object):
     ##################################################################
 
     def RaiseLeg(self,which):
-        if which == "inner":
+        if which == "left":
             self.JC.send_pos_traj(self.pos1,self.seq1_1,1,0.01)
             rospy.sleep(0.2)
             self.JC.send_pos_traj(self.seq1_1,self.seq1_2,1,0.01)
-            self.JC.set_eff('inner_ankle',-5)
+            self.JC.set_eff('left_ankle',-5)
             self.JC.send_pos_traj(self.seq1_2,self.seq1_3,1,0.01)
             rospy.sleep(0.2)
-        if which == "outer":
+        if which == "right":
             self.JC.send_pos_traj(self.pos1,self.seq2_1,1,0.01)
             rospy.sleep(0.2)
             self.JC.send_pos_traj(self.seq2_1,self.seq2_2,1,0.01)
-            self.JC.set_eff('left_ankle',-5)
             self.JC.set_eff('right_ankle',-5)
             self.JC.send_pos_traj(self.seq2_2,self.seq2_3,1,0.01)
             rospy.sleep(0.2)
 
     def TakeFirstStep(self,which):
-        if which == "inner":
-            self.JC.set_eff('left_ankle',-1)
-            self.JC.set_eff('right_ankle',-1)
-            self.JC.set_eff('left_hip',3.5)
-            self.JC.set_eff('right_hip',3.5)
-            self.JC.set_eff('inner_ankle',0)
-            self.JC.send_command()
-            rospy.sleep(0.67)
-            self.JC.set_eff('left_ankle',0.5)
-            self.JC.set_eff('right_ankle',0.5)
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
-            self.JC.set_eff('inner_ankle',0)
-            self.JC.send_command()
-
-        if which == "outer":
-            self.JC.set_eff('left_ankle',-3)
+        if which == "right":
             self.JC.set_eff('right_ankle',-3)
-            self.JC.set_eff('left_hip',-2.7)
-            self.JC.set_eff('right_hip',-2.7)
-            self.JC.set_pos('inner_ankle',0.1)
+            self.JC.set_eff('hip',5.5)
+            self.JC.set_eff('left_ankle',0.2)
             self.JC.send_command()
             rospy.sleep(0.1)
-            #JC.set_pos('inner_ankle',0.0)
-            self.JC.set_eff('left_ankle',0.1)
-            self.JC.set_eff('right_ankle',0.1)
+            self.JC.set_eff('right_ankle',0)
             self.JC.send_command()
             rospy.sleep(0.55)
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
-            self.JC.set_eff('inner_ankle',0.5)
+            self.JC.set_eff('hip',0)
+            self.JC.set_eff('left_ankle',1)
+            self.JC.send_command()
+            rospy.sleep(0.1)
+
+        if which == "left":
+            self.JC.set_eff('left_ankle',-3)
+            self.JC.set_eff('hip',-5.5)
+            self.JC.set_pos('right_ankle',0.2)
             self.JC.send_command()
             rospy.sleep(0.1)
             self.JC.set_eff('left_ankle',0)
-            self.JC.set_eff('right_ankle',0)
             self.JC.send_command()
+            rospy.sleep(0.55)
+            self.JC.set_eff('hip',0)
+            self.JC.set_eff('right_ankle',1)
+            self.JC.send_command()
+            rospy.sleep(0.1)
 
     def TakeStep(self,which):
-        #TimeElapsed = rospy.Time.now().to_sec() - self.StartTime
+        TimeElapsed = rospy.Time.now().to_sec() - self.StartTime
 
-        Aperture = abs(self.RS.GetJointPos('left_hip'))
-        SwingEff = self.SwingEff0 + self.kAp*(self.DesAp - Aperture)
-            
-        #if TimeElapsed<30:
-        #    Aperture = abs(self.RS.GetJointPos('left_hip'))
-        #    SwingEff = self.SwingEff0 + self.kAp*(self.DesAp - Aperture)
-        #    #print SwingEff
-        #else:
-        #    if which == "outer":
-        #        SwingEff = 0.20
-        #    else:
-        #        SwingEff = 0.28
-        if which == "outer":
+        if TimeElapsed<60:
+            Aperture = abs(self.RS.GetJointPos('hip'))
+            self.SwingEff = self.SwingEff0 + self.kAp*(self.DesAp - Aperture)
+			
+            print Aperture
+        else:
+            Aperture = abs(self.RS.GetJointPos('hip'))
+            #self.ToeOffEff = self.ToeOffEff0 - 2*(self.DesAp - Aperture)
+            #print self.ToeOffEff
+            #print self.SwingEff
+        if which == "right":
             # Toe off
-            self.JC.set_gains('inner_ankle',self.SupAnkGain_p,self.SupAnkGain_d,0,set_default = False)
-            self.JC.set_pos('inner_ankle',self.SupAnkSetPoint)
-            self.JC.set_eff('left_ankle',self.ToeOffEff)
+            self.JC.set_gains('left_ankle',self.SupAnkGain_p,self.SupAnkGain_d,0,set_default = False)
+            self.JC.set_pos('left_ankle',self.SupAnkSetPoint)
             self.JC.set_eff('right_ankle',self.ToeOffEff)
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
+            self.JC.set_eff('hip',0)
             self.JC.send_command()
             rospy.sleep(self.ToeOffDur)
             # Raise feet and swing
-            self.JC.set_eff('left_ankle',-3)
             self.JC.set_eff('right_ankle',-3)
-            self.JC.set_eff('left_hip',-SwingEff)
-            self.JC.set_eff('right_hip',-SwingEff)
+            self.JC.set_eff('hip',self.SwingEff)
             self.JC.send_command()
             rospy.sleep(self.TotSwingDur-self.FootExtDur-self.FreeSwingDur)
             # Lower feet
-            self.JC.set_eff('left_ankle',self.FootExtEff)
             self.JC.set_eff('right_ankle',self.FootExtEff)
             self.JC.send_command()
             rospy.sleep(self.FootExtDur)
             # End swing
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
-            self.JC.set_eff('left_ankle',0)
+            self.JC.set_eff('hip',0)
             self.JC.set_eff('right_ankle',0)
             self.JC.send_command()
             rospy.sleep(self.FreeSwingDur)
 
-        if which == "inner":
+        if which == "left":
             # Toe off
-            self.JC.set_gains('left_ankle',self.SupAnkGain_p,self.SupAnkGain_d,0,set_default = False)
             self.JC.set_gains('right_ankle',self.SupAnkGain_p,self.SupAnkGain_d,0,set_default = False)
-            self.JC.set_pos('left_ankle',self.SupAnkSetPoint)
             self.JC.set_pos('right_ankle',self.SupAnkSetPoint)
-            self.JC.set_eff('inner_ankle',self.ToeOffEff)
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
+            self.JC.set_eff('left_ankle',self.ToeOffEff)
+            self.JC.set_eff('hip',0)
             self.JC.send_command()
             rospy.sleep(self.ToeOffDur)
             # Raise feet and swing
-            self.JC.set_eff('inner_ankle',-3)
-            self.JC.set_eff('left_hip',SwingEff)
-            self.JC.set_eff('right_hip',SwingEff)
+            self.JC.set_eff('left_ankle',-3)
+            self.JC.set_eff('hip',-self.SwingEff)
             self.JC.send_command()
             rospy.sleep(self.TotSwingDur-self.FootExtDur-self.FreeSwingDur)
             # Lower feet
-            self.JC.set_eff('inner_ankle',self.FootExtEff)
+            self.JC.set_eff('left_ankle',self.FootExtEff)
             self.JC.send_command()
             rospy.sleep(self.FootExtDur)
             # End swing
-            self.JC.set_eff('left_hip',0)
-            self.JC.set_eff('right_hip',0)
-            self.JC.set_eff('inner_ankle',0)
+            self.JC.set_eff('hip',0)
+            self.JC.set_eff('left_ankle',0)
             self.JC.send_command()
             rospy.sleep(self.FreeSwingDur)
 
     def ResetPose(self):
-        self.JC.set_pos('left_hip',0)
+        self.JC.set_pos('hip',0)
         self.JC.set_pos('left_ankle',0)
-        self.JC.set_pos('right_hip',0)
         self.JC.set_pos('right_ankle',0)
-        self.JC.set_pos('inner_ankle',0)
         self.JC.send_command()
 
     def RS_cb(self,msg):
-
         self.RS.UpdateState(msg)
 
     def Odom_cb(self,msg):
@@ -259,17 +237,18 @@ class CB_Controller(object):
 
     def Run(self,TimeOut = 0):
         rospy.sleep(0.1) 
-        # Start with inner foot raised
+
+        # Start with right foot raised
         self.JC.send_pos_traj(self.RS.GetJointPos(),self.seq2_3,0.5,0.01)
         self.reset()
         rospy.sleep(1) 
 
         self.StartTime = rospy.Time.now().to_sec()
 
-        self.TakeFirstStep("outer")
-        self.ApertureMean = abs(self.RS.GetJointPos('left_hip'))
+        self.TakeFirstStep("right")
+        self.ApertureMean = abs(self.RS.GetJointPos('hip'))
 
-        self.Leg = "inner"
+        self.Leg = "left"
         self.Go=1
         while self.Go == 1:
             TimeElapsed = rospy.Time.now().to_sec() - self.StartTime
@@ -281,40 +260,21 @@ class CB_Controller(object):
             self.TakeStep(self.Leg)
 
             self.StepsTaken += 1
-            ThisAperture = abs(self.RS.GetJointPos('left_hip'))
+            ThisAperture = abs(self.RS.GetJointPos('hip'))
             self.ApertureMean += (ThisAperture-self.ApertureMean) / self.StepsTaken
             self.ApertureStd += ((ThisAperture-self.ApertureMean)**2 - self.ApertureStd) / self.StepsTaken
 
-            if self.Leg == "inner":
-                self.Leg = "outer"
+            if self.Leg == "right":
+                self.Leg = "left"
             else:
-                self.Leg = "inner"
-    def __del__(self):
-        self.MsgSub.unregister()
-        self.OdomSub.unregister()
-
-
+                self.Leg = "right"
 
 
 ##################################################################
 ######################### USAGE EXAMPLE ##########################
 ##################################################################
-def main(lst):
-    # for k in xrange(10):
-    CBC = CB_Controller(lst)
-    A,B = CBC.Run(30)
-    del CBC
-    out_file = open('last_score.txt','w')
-    out_file.write(str(A.x)+'\n')
-    out_file.write(str(A.y)+'\n')
-    out_file.write(str(A.z)+'\n')
-    out_file.write(str(B))
-    rospy.sleep(1)
-
 
 if __name__=='__main__':
-    lst = []
-    for k in sys.argv[1:]:
-        lst.append(float(k))
-    main(lst)
-
+    CBC = GCB_Controller([])
+    A,B = CBC.Run(60)
+    print A,B

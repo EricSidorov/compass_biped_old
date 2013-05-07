@@ -8,9 +8,8 @@
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/compass_biped</url>
-  <depend package="atlas_utils"/>
-  <depend package="robotcon_msgs"/>
-  <depend package="GA"/>
+  <depend package="RobotController"/>
+
 </package>
 
 
