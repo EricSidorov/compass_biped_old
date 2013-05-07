@@ -1,0 +1,15 @@
+<package>
+  <description brief="compass_biped">
+
+     compass_biped
+
+  </description>
+  <author>Darpa Tech 3</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/compass_biped</url>
+  <depend package="RobotController"/>
+
+</package>
+
+
